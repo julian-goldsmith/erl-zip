@@ -4,29 +4,25 @@
 
 -record(rle_run, {byte, count}).
 
-gen_runs([HByte|TBytes], #rle_run{byte=CByte, count=CCount}, Acc) when HByte == CByte ->
-	gen_runs(TBytes, #rle_run{byte=CByte, count=CCount + 1}, Acc);
-gen_runs([HByte|TBytes], #rle_run{byte=CByte, count=CCount}, Acc) when HByte /= CByte ->
-	gen_runs(TBytes, #rle_run{byte=HByte, count=1},
-		 Acc ++ [#rle_run{byte=CByte, count=CCount}]);
-gen_runs([], #rle_run{byte=CByte, count=CCount}, Acc) when CCount > 0 ->
-	Acc ++ [#rle_run{byte=CByte, count=CCount}].
-
 % Returns a list of bytes to merge into a binary.
 encode_run(#rle_run{byte=CByte, count=CCount}) when CCount < 4 ->
 	lists:duplicate(CCount, CByte);
 encode_run(#rle_run{byte=CByte, count=CCount}) when CCount =< 259 ->
-	lists:duplicate(4, CByte) ++ [CCount - 4];
+	lists:duplicate(4, CByte) ++ [<<(CCount - 4):8>>];
 encode_run(#rle_run{byte=CByte, count=CCount}) ->
-	encode_run(#rle_run{byte=CByte, count=259})
+	lists:duplicate(4, CByte) ++ [<<255>>]
 		++ encode_run(#rle_run{byte=CByte, count=CCount-259}).
 
-% TODO: It would be much more efficient to generate runs while encoding.
+encode_runs([HByte|TBytes], #rle_run{byte=CByte, count=CCount}, Acc) when HByte == CByte ->
+	encode_runs(TBytes, #rle_run{byte=CByte, count=CCount + 1}, Acc);
+encode_runs([HByte|TBytes], Run, Acc) ->
+	encode_runs(TBytes, #rle_run{byte=HByte, count=1}, Acc ++ encode_run(Run));
+encode_runs([], Run, Acc) -> Acc ++ encode_run(Run).
+
 encode([HByte|TBytes]) ->
-	Runs = gen_runs(TBytes, #rle_run{byte=HByte, count=1}, []),
-	EncBytes = lists:flatmap(fun encode_run/1, Runs),
+	EncBytes = encode_runs(TBytes, #rle_run{byte=HByte, count=1}, []),
 	binary:list_to_bin(EncBytes);
-encode([]) -> [].
+encode([]) -> <<>>.
 
 
 % TODO: It would be much more efficient to expand runs while decoding.
