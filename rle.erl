@@ -25,18 +25,18 @@ encode(<<HByte, TBytes/binary>>) ->
 encode([]) -> <<>>.
 
 
-% TODO: It would be much more efficient to expand runs while decoding.
-expand_run(#rle_run{byte=CByte, count=CCount}) -> lists:duplicate(CCount, CByte).
+% PCount of 0 means we need to initialize the run.
+decode_runs(<<CByte, TBytes/binary>>, _PByte, PCount, Acc) when PCount == 0 ->
+	decode_runs(TBytes, CByte, 1, Acc);
+decode_runs(<<CByte, TBytes/binary>>, PByte, PCount, Acc) when PCount == 4 ->
+	decode_runs(TBytes, 0, 0, Acc ++ lists:duplicate(4 + CByte, PByte));
+decode_runs(<<CByte, TBytes/binary>>, PByte, PCount, Acc) when CByte == PByte ->
+	decode_runs(TBytes, PByte, PCount + 1, Acc);
+decode_runs(<<CByte, TBytes/binary>>, PByte, PCount, Acc) -> 
+	decode_runs(TBytes, CByte, 1, Acc ++ lists:duplicate(PCount, PByte));
+decode_runs(<<>>, PByte, PCount, Acc) ->
+	Acc ++ lists:duplicate(PCount, PByte).
 
-decode_runs(<<CByte, NByte, TBytes/binary>>, #rle_run{byte=PByte, count=PCount}, Acc) when PCount == 4 ->
-	decode_runs(TBytes, #rle_run{byte=NByte, count=1}, Acc ++ [#rle_run{byte=PByte, count=(4 + CByte)}]);
-decode_runs(<<CByte, TBytes/binary>>, #rle_run{byte=PByte, count=PCount}, Acc) when CByte == PByte ->
-	decode_runs(TBytes, #rle_run{byte=PByte, count=PCount + 1}, Acc);
-decode_runs(<<CByte, TBytes/binary>>, Run, Acc) -> 
-	decode_runs(TBytes, #rle_run{byte=CByte, count=1}, Acc ++ [Run]);
-decode_runs(<<>>, Run, Acc) -> Acc ++ [Run].
-
-decode(<<HByte, TBytes/binary>>) ->
-	Runs = decode_runs(TBytes, #rle_run{byte=HByte, count=1}, []),
-	lists:flatmap(fun expand_run/1, Runs);
-decode(<<>>) -> [].
+decode(Bytes) ->
+	DecBytes = decode_runs(Bytes, 0, 0, []),
+	binary:list_to_bin(DecBytes).
