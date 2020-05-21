@@ -2,41 +2,39 @@
 -export([encode/1]).
 -export([decode/1]).
 
--record(rle_run, {byte, count}).
+encode_run(CByte, CCount, Acc) when CCount < 4 ->
+	Expanded = binary:copy(<<CByte>>, CCount),
+	<<Acc/binary, Expanded/binary>>;
+encode_run(CByte, CCount, Acc) when CCount =< 259 ->
+	<<Acc/binary, CByte, CByte, CByte, CByte, (CCount - 4):8>>;
+encode_run(CByte, CCount, Acc) ->
+	encode_run(CByte, CCount - 259,
+		<<Acc/binary, CByte, CByte, CByte, CByte, 255>>).
 
-% Returns a list of bytes to merge into a binary.
-encode_run(#rle_run{byte=CByte, count=CCount}) when CCount < 4 ->
-	lists:duplicate(CCount, CByte);
-encode_run(#rle_run{byte=CByte, count=CCount}) when CCount =< 259 ->
-	lists:duplicate(4, CByte) ++ [<<(CCount - 4):8>>];
-encode_run(#rle_run{byte=CByte, count=CCount}) ->
-	lists:duplicate(4, CByte) ++ [<<255>>]
-		++ encode_run(#rle_run{byte=CByte, count=CCount-259}).
+encode_runs(<<HByte, TBytes/binary>>, CByte, CCount, Acc) when HByte == CByte ->
+	encode_runs(TBytes, CByte, CCount + 1, Acc);
+encode_runs(<<HByte, TBytes/binary>>, CByte, CCount, Acc) ->
+	encode_runs(TBytes, HByte, 1, encode_run(CByte, CCount, Acc));
+encode_runs(<<>>, CByte, CCount, Acc) ->
+	encode_run(CByte, CCount, Acc).
 
-encode_runs(<<HByte, TBytes/binary>>, #rle_run{byte=CByte, count=CCount}, Acc) when HByte == CByte ->
-	encode_runs(TBytes, #rle_run{byte=CByte, count=CCount + 1}, Acc);
-encode_runs(<<HByte, TBytes/binary>>, Run, Acc) ->
-	encode_runs(TBytes, #rle_run{byte=HByte, count=1}, Acc ++ encode_run(Run));
-encode_runs(<<>>, Run, Acc) -> Acc ++ encode_run(Run).
-
-encode(<<HByte, TBytes/binary>>) ->
-	EncBytes = encode_runs(TBytes, #rle_run{byte=HByte, count=1}, []),
-	binary:list_to_bin(EncBytes);
+encode(<<HByte, TBytes/binary>>) -> encode_runs(TBytes, HByte, 1, <<>>);
 encode([]) -> <<>>.
 
 
 % PCount of 0 means we need to initialize the run.
-decode_runs(<<CByte, TBytes/binary>>, _PByte, PCount, Acc) when PCount == 0 ->
-	decode_runs(TBytes, CByte, 1, Acc);
+% That is required because we don't always have a next byte.
 decode_runs(<<CByte, TBytes/binary>>, PByte, PCount, Acc) when PCount == 4 ->
-	decode_runs(TBytes, 0, 0, Acc ++ lists:duplicate(4 + CByte, PByte));
-decode_runs(<<CByte, TBytes/binary>>, PByte, PCount, Acc) when CByte == PByte ->
-	decode_runs(TBytes, PByte, PCount + 1, Acc);
+	Expanded = binary:copy(<<PByte>>, 4 + CByte),
+	decode_runs(TBytes, 0, 0, <<Acc/binary, Expanded/binary>>);
+decode_runs(<<CByte, TBytes/binary>>, PByte, PCount, Acc)
+		when (CByte == PByte) or (PCount == 0) ->
+	decode_runs(TBytes, CByte, PCount + 1, Acc);
 decode_runs(<<CByte, TBytes/binary>>, PByte, PCount, Acc) -> 
-	decode_runs(TBytes, CByte, 1, Acc ++ lists:duplicate(PCount, PByte));
+	Expanded = binary:copy(<<PByte>>, PCount),
+	decode_runs(TBytes, CByte, 1, <<Acc/binary, Expanded/binary>>);
 decode_runs(<<>>, PByte, PCount, Acc) ->
-	Acc ++ lists:duplicate(PCount, PByte).
+	Expanded = binary:copy(<<PByte>>, PCount),
+	<<Acc/binary, Expanded/binary>>.
 
-decode(Bytes) ->
-	DecBytes = decode_runs(Bytes, 0, 0, []),
-	binary:list_to_bin(DecBytes).
+decode(Bytes) -> decode_runs(Bytes, 0, 0, <<>>).
